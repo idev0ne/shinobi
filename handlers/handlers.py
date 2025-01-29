@@ -26,23 +26,32 @@ from service.unique_photo import make_unique_photo
 from service.unique_video import make_unique_video
 
 # =========================
-#  Асинхронные обёртки
+# Настройка: хотим максимум 2 задачи "обработки" параллельно
 # =========================
+MAX_CONCURRENT_TASKS = 2
+semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+
+# =========================
+#  Асинхронные обёртки c ограничением параллелизма
+# =========================
+
 async def process_photo_async(input_path: str, output_path: str):
     """
     Запускаем make_unique_photo в отдельном потоке (Executor),
-    чтобы не блокировать event loop при выполнении синхронного кода.
+    но с ограничением - не более N задач одновременно.
     """
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, make_unique_photo, input_path, output_path)
+    async with semaphore:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, make_unique_photo, input_path, output_path)
 
 async def process_video_async(input_path: str, output_path: str):
     """
     Запускаем make_unique_video в отдельном потоке (Executor),
-    чтобы не блокировать event loop при выполнении синхронного кода.
+    но с ограничением - не более N задач одновременно.
     """
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, make_unique_video, input_path, output_path)
+    async with semaphore:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, make_unique_video, input_path, output_path)
 
 
 # =========================
@@ -109,7 +118,7 @@ async def handle_number(message: Message, state: FSMContext):
 
 async def handle_file(message: Message, state: FSMContext, bot: Bot):
     """
-    Скачивает фото/видео, обрабатывает N раз (параллельно),
+    Скачивает фото/видео, обрабатывает N раз (с ограниченным параллелизмом),
     отправляет результат, и удаляет временные файлы.
     """
     current_state = await state.get_state()
@@ -144,12 +153,13 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot):
             out_paths.append(output_path)
 
             # Каждую копию обрабатываем в отдельной асинхронной задаче
+            # (но внутри применяем Semaphore)
             task = asyncio.create_task(
                 process_photo_async(input_path, output_path)
             )
             tasks.append(task)
 
-        # Запускаем все задачи параллельно
+        # Запускаем все задачи (но реально не более 2 одновременно)
         await asyncio.gather(*tasks)
 
         # После завершения обрабатываем результат
@@ -195,7 +205,7 @@ async def handle_file(message: Message, state: FSMContext, bot: Bot):
             )
             tasks.append(task)
 
-        # Параллельный запуск всех копий
+        # Параллельный запуск (но реально max 2 одновременно)
         await asyncio.gather(*tasks)
 
         # Отправляем готовые файлы
