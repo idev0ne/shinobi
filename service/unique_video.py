@@ -2,6 +2,22 @@ import random
 import subprocess
 import imageio_ffmpeg
 
+def is_nvidia_gpu_available():
+    """
+    Проверяем, есть ли доступ к утилите nvidia-smi,
+    что обычно говорит о наличии и рабочем состоянии NVIDIA GPU.
+    """
+    try:
+        subprocess.run(
+            ["nvidia-smi"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
 def make_unique_video(input_path, output_path):
     # Генерация "мягких" случайных параметров
     brightness   = random.uniform(-0.05, 0.05)   # вместо -0.1..0.1
@@ -29,6 +45,14 @@ def make_unique_video(input_path, output_path):
     # Фильтр для аудио
     audio_filters = f"volume={volume_gain:.3f},atempo={atempo_val:.3f}"
 
+    # Проверяем, есть ли NVIDIA GPU
+    if is_nvidia_gpu_available():
+        video_codec = 'h264_nvenc'
+        print("Используем аппаратное кодирование (NVENC).")
+    else:
+        video_codec = 'libx264'
+        print("Аппаратное кодирование не доступно. Используем CPU (libx264).")
+
     # Путь к локальному ffmpeg
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -38,11 +62,13 @@ def make_unique_video(input_path, output_path):
         '-i', input_path,
         '-vf', video_filters,
         '-af', audio_filters,
-        '-c:v', 'libx264',
+        '-c:v', video_codec,
+        # Для NVENC некоторые параметры могут отличаться, 
+        # но baseline/level 3.0 тоже работают, если это нужно:
         '-profile:v', 'baseline',
         '-level', '3.0',
         '-pix_fmt', 'yuv420p',
-        '-preset', 'medium',
+        '-preset', 'medium',   # Можно менять на 'fast'/'slow' при необходимости
         '-movflags', '+faststart',
         '-c:a', 'aac',
         output_path
@@ -57,5 +83,3 @@ def make_unique_video(input_path, output_path):
     print(f"Colorbalance: rs={rs:.3f}, gs={gs:.3f}, bs={bs:.3f}")
     print(f"Volume={volume_gain:.3f}, Atempo={atempo_val:.3f}")
     print("Файл сохранён как:", output_path)
-
-
